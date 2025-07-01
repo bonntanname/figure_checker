@@ -1,103 +1,220 @@
-import Image from "next/image";
+'use client';
+
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [directory, setDirectory] = useState('');
+  const [images, setImages] = useState<string[]>([]);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [error, setError] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [directoryHandle, setDirectoryHandle] = useState<any>(null);
+  const [imageFiles, setImageFiles] = useState<Map<string, File>>(new Map());
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+  const handleDirectorySelect = async () => {
+    try {
+      // @ts-ignore - showDirectoryPicker is supported in modern browsers
+      if ('showDirectoryPicker' in window) {
+        // @ts-ignore
+        const dirHandle = await window.showDirectoryPicker();
+        setDirectoryHandle(dirHandle);
+        setDirectory(dirHandle.name);
+        setError('');
+        
+        // Read files from directory handle
+        const imageFileMap = new Map<string, File>();
+        const imageNames: string[] = [];
+        const evaluatedFiles = new Set<string>();
+        
+        // Check for existing CSV to skip already evaluated images
+        try {
+          const csvHandle = await dirHandle.getFileHandle('results.csv');
+          const csvFile = await csvHandle.getFile();
+          const csvContent = await csvFile.text();
+          const lines = csvContent.split('\n').slice(1); // Skip header
+          lines.forEach(line => {
+            const [imageName] = line.split(',');
+            if (imageName && imageName.trim()) {
+              evaluatedFiles.add(imageName.trim());
+            }
+          });
+        } catch {
+          // CSV doesn't exist yet, which is fine
+        }
+        
+        for await (const [name, handle] of dirHandle) {
+          if (handle.kind === 'file' && /\.(jpg|jpeg|png|gif)$/i.test(name)) {
+            if (!evaluatedFiles.has(name)) {
+              const file = await handle.getFile();
+              imageFileMap.set(name, file);
+              imageNames.push(name);
+            }
+          }
+        }
+        
+        setImageFiles(imageFileMap);
+        setImages(imageNames);
+        setCurrentImageIndex(0);
+      } else {
+        fileInputRef.current?.click();
+      }
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        setError('Failed to select directory');
+      }
+    }
+  };
+
+  const handleDirectoryChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (files && files.length > 0) {
+      const file = files[0];
+      // @ts-ignore - webkitRelativePath is supported in modern browsers
+      const path = file.webkitRelativePath;
+      if (path) {
+        const dirPath = path.split('/')[0];
+        setDirectory(dirPath);
+        setError('');
+        
+        // Process files from the file input
+        const imageFileMap = new Map<string, File>();
+        const imageNames: string[] = [];
+        
+        Array.from(files).forEach(file => {
+          // @ts-ignore
+          const relativePath = file.webkitRelativePath;
+          const fileName = relativePath.split('/').pop();
+          if (fileName && /\.(jpg|jpeg|png|gif)$/i.test(fileName)) {
+            imageFileMap.set(fileName, file);
+            imageNames.push(fileName);
+          }
+        });
+        
+        setImageFiles(imageFileMap);
+        setImages(imageNames);
+        setCurrentImageIndex(0);
+      }
+    }
+  };
+
+
+  const handleChoice = useCallback(async (choice: 'Y' | 'N') => {
+    if (images.length === 0) return;
+
+    const image = images[currentImageIndex];
+    
+    try {
+      if (directoryHandle) {
+        // Use File System Access API to write CSV
+        let csvFileHandle;
+        try {
+          csvFileHandle = await directoryHandle.getFileHandle('results.csv');
+        } catch {
+          // File doesn't exist, create it
+          csvFileHandle = await directoryHandle.getFileHandle('results.csv', { create: true });
+          const writable = await csvFileHandle.createWritable();
+          await writable.write('Image,Choice\n');
+          await writable.close();
+        }
+        
+        // Append to CSV
+        const file = await csvFileHandle.getFile();
+        const existingContent = await file.text();
+        const writable = await csvFileHandle.createWritable();
+        await writable.write(existingContent + `${image},${choice}\n`);
+        await writable.close();
+      } else {
+        // For fallback file input method, save to localStorage temporarily
+        const savedChoices = JSON.parse(localStorage.getItem('imageChoices') || '[]');
+        savedChoices.push({ directory, image, choice, timestamp: new Date().toISOString() });
+        localStorage.setItem('imageChoices', JSON.stringify(savedChoices));
+        setError('Choice saved to browser storage. Use "Select Directory" for direct file saving.');
+      }
+      
+      if (currentImageIndex < images.length - 1) {
+        setCurrentImageIndex(currentImageIndex + 1);
+      } else {
+        setImages([]); // No more images
+      }
+    } catch (error) {
+      console.error('Failed to save choice:', error);
+      setError('Failed to save choice');
+    }
+  }, [directory, images, currentImageIndex, directoryHandle]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'y') {
+        handleChoice('Y');
+      } else if (event.key === 'n') {
+        handleChoice('N');
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [handleChoice]);
+
+
+  return (
+    <div className="container mx-auto p-4">
+      <h1 className="text-2xl font-bold mb-4">Image Labeling App</h1>
+
+      <div className="mb-4">
+        <label className="block mb-2">Directory Selection:</label>
+        <div className="flex space-x-2 mb-2">
+          <button 
+            onClick={handleDirectorySelect}
+            className="bg-green-500 text-white p-2 rounded"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+            Select Directory
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            // @ts-ignore - webkitdirectory is supported in modern browsers
+            webkitdirectory=""
+            directory=""
+            multiple
+            onChange={handleDirectoryChange}
+            className="hidden"
+          />
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
+        {directory && (
+          <div className="text-sm text-gray-600 mt-2">
+            Selected directory: {directory}
+          </div>
+        )}
+      </div>
+
+      {error && <p className="text-red-500">{error}</p>}
+
+      {images.length > 0 && currentImageIndex < images.length ? (
+        <div>
+          <div className="mb-2">
+            <h2 className="text-lg font-semibold">Current Image:</h2>
+            <p className="text-gray-600">{images[currentImageIndex]}</p>
+            <p className="text-sm text-gray-500">Image {currentImageIndex + 1} of {images.length}</p>
+          </div>
+          <img
+            src={
+              imageFiles.has(images[currentImageIndex])
+                ? URL.createObjectURL(imageFiles.get(images[currentImageIndex])!)
+                : ''
+            }
+            alt={images[currentImageIndex]}
+            className="max-w-full h-auto mb-4"
           />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+          <div className="flex space-x-4">
+            <button onClick={() => handleChoice('Y')} className="bg-green-500 text-white p-2">Yes (y)</button>
+            <button onClick={() => handleChoice('N')} className="bg-red-500 text-white p-2">No (n)</button>
+          </div>
+        </div>
+      ) : (
+        <p>{directory ? 'No more images to label.' : 'Please select a directory to start labeling images.'}</p>
+      )}
     </div>
   );
 }
