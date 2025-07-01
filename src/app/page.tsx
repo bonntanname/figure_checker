@@ -8,14 +8,13 @@ export default function Home() {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [error, setError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [directoryHandle, setDirectoryHandle] = useState<any>(null);
+  const [directoryHandle, setDirectoryHandle] = useState<FileSystemDirectoryHandle | null>(null);
   const [imageFiles, setImageFiles] = useState<Map<string, File>>(new Map());
 
   const handleDirectorySelect = async () => {
     try {
-      // @ts-ignore - showDirectoryPicker is supported in modern browsers
       if ('showDirectoryPicker' in window) {
-        // @ts-ignore
+        // @ts-expect-error - showDirectoryPicker not in TypeScript definitions
         const dirHandle = await window.showDirectoryPicker();
         setDirectoryHandle(dirHandle);
         setDirectory(dirHandle.name);
@@ -32,7 +31,7 @@ export default function Home() {
           const csvFile = await csvHandle.getFile();
           const csvContent = await csvFile.text();
           const lines = csvContent.split('\n').slice(1); // Skip header
-          lines.forEach(line => {
+          lines.forEach((line: string) => {
             const [imageName] = line.split(',');
             if (imageName && imageName.trim()) {
               evaluatedFiles.add(imageName.trim());
@@ -59,7 +58,7 @@ export default function Home() {
         fileInputRef.current?.click();
       }
     } catch (err) {
-      if (err.name !== 'AbortError') {
+      if (err instanceof Error && err.name !== 'AbortError') {
         setError('Failed to select directory');
       }
     }
@@ -69,8 +68,7 @@ export default function Home() {
     const files = event.target.files;
     if (files && files.length > 0) {
       const file = files[0];
-      // @ts-ignore - webkitRelativePath is supported in modern browsers
-      const path = file.webkitRelativePath;
+      const path = (file as File & { webkitRelativePath: string }).webkitRelativePath;
       if (path) {
         const dirPath = path.split('/')[0];
         setDirectory(dirPath);
@@ -81,8 +79,7 @@ export default function Home() {
         const imageNames: string[] = [];
         
         Array.from(files).forEach(file => {
-          // @ts-ignore
-          const relativePath = file.webkitRelativePath;
+          const relativePath = (file as File & { webkitRelativePath: string }).webkitRelativePath;
           const fileName = relativePath.split('/').pop();
           if (fileName && /\.(jpg|jpeg|png|gif)$/i.test(fileName)) {
             imageFileMap.set(fileName, file);
@@ -174,9 +171,7 @@ export default function Home() {
           <input
             ref={fileInputRef}
             type="file"
-            // @ts-ignore - webkitdirectory is supported in modern browsers
-            webkitdirectory=""
-            directory=""
+            {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
             multiple
             onChange={handleDirectoryChange}
             className="hidden"
@@ -198,6 +193,7 @@ export default function Home() {
             <p className="text-gray-600">{images[currentImageIndex]}</p>
             <p className="text-sm text-gray-500">Image {currentImageIndex + 1} of {images.length}</p>
           </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={
               imageFiles.has(images[currentImageIndex])
