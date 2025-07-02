@@ -10,6 +10,11 @@ export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [directoryHandle, setDirectoryHandle] = useState<FileSystemDirectoryHandle | null>(null);
   const [imageFiles, setImageFiles] = useState<Map<string, File>>(new Map());
+  const [labels, setLabels] = useState([
+    { key: 'y', value: 'Y' },
+    { key: 'n', value: 'N' }
+  ]);
+  const [settingsWindow, setSettingsWindow] = useState<Window | null>(null);
 
   const handleDirectorySelect = async () => {
     try {
@@ -95,7 +100,7 @@ export default function Home() {
   };
 
 
-  const handleChoice = useCallback(async (choice: 'Y' | 'N') => {
+  const handleChoice = useCallback(async (choice: string) => {
     if (images.length === 0) return;
 
     const image = images[currentImageIndex];
@@ -141,10 +146,11 @@ export default function Home() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'y') {
-        handleChoice('Y');
-      } else if (event.key === 'n') {
-        handleChoice('N');
+      const matchedLabel = labels.find(label => 
+        label.key.toLowerCase() === event.key.toLowerCase()
+      );
+      if (matchedLabel) {
+        handleChoice(matchedLabel.value);
       }
     };
 
@@ -152,12 +158,226 @@ export default function Home() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [handleChoice]);
+  }, [handleChoice, labels]);
+
+  const openSettingsWindow = () => {
+    if (settingsWindow && !settingsWindow.closed) {
+      settingsWindow.focus();
+      return;
+    }
+
+    const popup = window.open(
+      '',
+      'settings',
+      'width=600,height=500,scrollbars=yes,resizable=yes,left=' + 
+      (screen.width / 2 - 300) + ',top=' + (screen.height / 2 - 250)
+    );
+
+    if (!popup) {
+      alert('ポップアップがブロックされました。ブラウザの設定でポップアップを許可してください。');
+      return;
+    }
+
+    setSettingsWindow(popup);
+
+    popup.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Label Settings</title>
+          <script src="https://cdn.tailwindcss.com"></script>
+          <style>
+            body { font-family: system-ui, -apple-system, sans-serif; }
+          </style>
+        </head>
+        <body class="p-6 bg-gray-50">
+          <div class="max-w-lg mx-auto bg-white rounded-lg shadow-lg p-6">
+            <h2 class="text-xl font-bold mb-4 text-gray-800">Label Settings</h2>
+            
+            <div class="mb-4">
+              <p class="text-sm text-gray-600 mb-2">
+                キーボードショートカット（Key）と保存される値（CSV Value）を設定してください
+              </p>
+            </div>
+
+            <div id="options-container" class="space-y-3">
+              ${labels.map((label, index) => `
+                <div class="flex items-center gap-3 p-3 border border-gray-200 rounded-lg bg-gray-50" data-index="${index}">
+                  <div class="flex-1">
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Keyboard Key</label>
+                    <input
+                      type="text"
+                      placeholder="e.g., y"
+                      value="${label.key}"
+                      class="option-key w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-center font-mono"
+                      maxlength="1"
+                    />
+                  </div>
+                  <div class="flex-1">
+                    <label class="block text-xs font-medium text-gray-600 mb-1">CSV Value</label>
+                    <input
+                      type="text"
+                      placeholder="e.g., Y"
+                      value="${label.value}"
+                      class="option-value w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <button
+                    onclick="removeOption(${index})"
+                    class="text-red-500 hover:text-red-700 p-2 mt-5"
+                    title="削除"
+                  >
+                    ✕
+                  </button>
+                </div>
+              `).join('')}
+            </div>
+            
+            <div class="mt-4">
+              <button
+                onclick="addOption()"
+                class="w-full px-4 py-2 border-2 border-dashed border-gray-300 text-gray-600 rounded hover:border-gray-400 hover:text-gray-700"
+              >
+                + オプションを追加
+              </button>
+            </div>
+            
+            <div class="flex justify-end space-x-2 mt-6">
+              <button
+                onclick="window.close()"
+                class="px-4 py-2 text-gray-600 border border-gray-300 rounded hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onclick="saveSettings()"
+                class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+
+          <script>
+            let optionCount = ${labels.length};
+
+            function addOption() {
+              const container = document.getElementById('options-container');
+              const newIndex = optionCount++;
+              const optionHtml = \`
+                <div class="flex items-center gap-3 p-3 border border-gray-200 rounded-lg bg-gray-50" data-index="\${newIndex}">
+                  <div class="flex-1">
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Keyboard Key</label>
+                    <input
+                      type="text"
+                      placeholder="e.g., g"
+                      value=""
+                      class="option-key w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-center font-mono"
+                      maxlength="1"
+                    />
+                  </div>
+                  <div class="flex-1">
+                    <label class="block text-xs font-medium text-gray-600 mb-1">CSV Value</label>
+                    <input
+                      type="text"
+                      placeholder="e.g., Good"
+                      value=""
+                      class="option-value w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <button
+                    onclick="removeOption(\${newIndex})"
+                    class="text-red-500 hover:text-red-700 p-2 mt-5"
+                    title="削除"
+                  >
+                    ✕
+                  </button>
+                </div>
+              \`;
+              container.insertAdjacentHTML('beforeend', optionHtml);
+            }
+
+            function removeOption(index) {
+              const option = document.querySelector(\`[data-index="\${index}"]\`);
+              if (option && document.querySelectorAll('#options-container > div').length > 1) {
+                option.remove();
+              } else if (document.querySelectorAll('#options-container > div').length === 1) {
+                alert('最低1つのオプションは必要です');
+              }
+            }
+
+            function saveSettings() {
+              const options = document.querySelectorAll('#options-container > div');
+              const newLabels = [];
+              
+              options.forEach(option => {
+                const key = option.querySelector('.option-key').value.trim();
+                const value = option.querySelector('.option-value').value.trim();
+                
+                if (key && value) {
+                  newLabels.push({ key, value });
+                }
+              });
+              
+              if (newLabels.length === 0) {
+                alert('少なくとも1つの有効なオプションを設定してください');
+                return;
+              }
+              
+              // Check for duplicate keys
+              const keys = newLabels.map(label => label.key.toLowerCase());
+              const uniqueKeys = [...new Set(keys)];
+              if (keys.length !== uniqueKeys.length) {
+                alert('キーボードキーが重複しています。異なるキーを設定してください');
+                return;
+              }
+              
+              if (window.opener && !window.opener.closed) {
+                window.opener.postMessage({ type: 'saveSettings', labels: newLabels }, '*');
+              }
+              
+              window.close();
+            }
+          </script>
+        </body>
+      </html>
+    `);
+
+    popup.document.close();
+  };
+
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data.type === 'saveSettings') {
+        setLabels(event.data.labels);
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (settingsWindow && !settingsWindow.closed) {
+        settingsWindow.close();
+      }
+    };
+  }, [settingsWindow]);
 
 
   return (
     <div className="container mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-4">Image Labeling App</h1>
+      <div className="flex justify-between items-center mb-4">
+        <h1 className="text-2xl font-bold">Image Labeling App</h1>
+        <button 
+          onClick={openSettingsWindow}
+          className="bg-blue-500 text-white px-4 py-2 rounded"
+        >
+          Settings
+        </button>
+      </div>
+
 
       <div className="mb-4">
         <label className="block mb-2">Directory Selection:</label>
@@ -203,9 +423,23 @@ export default function Home() {
             alt={images[currentImageIndex]}
             className="max-w-full h-auto mb-4"
           />
-          <div className="flex space-x-4">
-            <button onClick={() => handleChoice('Y')} className="bg-green-500 text-white p-2">Yes (y)</button>
-            <button onClick={() => handleChoice('N')} className="bg-red-500 text-white p-2">No (n)</button>
+          <div className="flex flex-wrap gap-3">
+            {labels.map((label, index) => (
+              <button 
+                key={`${label.key}-${label.value}`}
+                onClick={() => handleChoice(label.value)} 
+                className={`text-white p-2 px-4 rounded ${
+                  index === 0 ? 'bg-green-500 hover:bg-green-600' : 
+                  index === 1 ? 'bg-red-500 hover:bg-red-600' :
+                  index === 2 ? 'bg-blue-500 hover:bg-blue-600' :
+                  index === 3 ? 'bg-yellow-500 hover:bg-yellow-600' :
+                  index === 4 ? 'bg-purple-500 hover:bg-purple-600' :
+                  'bg-gray-500 hover:bg-gray-600'
+                }`}
+              >
+                {label.value} ({label.key})
+              </button>
+            ))}
           </div>
         </div>
       ) : (
