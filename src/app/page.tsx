@@ -2,6 +2,17 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 
+const getLabelColors = (index: number) => {
+  const colors = [
+    { bg: 'bg-green-500 hover:bg-green-600', text: 'text-green-600' },
+    { bg: 'bg-red-500 hover:bg-red-600', text: 'text-red-600' },
+    { bg: 'bg-blue-500 hover:bg-blue-600', text: 'text-blue-600' },
+    { bg: 'bg-yellow-500 hover:bg-yellow-600', text: 'text-yellow-600' },
+    { bg: 'bg-purple-500 hover:bg-purple-600', text: 'text-purple-600' },
+  ];
+  return colors[index] || { bg: 'bg-gray-500 hover:bg-gray-600', text: 'text-gray-600' };
+};
+
 export default function Home() {
   const [directory, setDirectory] = useState('');
   const [images, setImages] = useState<string[]>([]);
@@ -15,6 +26,7 @@ export default function Home() {
     { key: 'n', value: 'N' }
   ]);
   const [settingsWindow, setSettingsWindow] = useState<Window | null>(null);
+  const [imageChoices, setImageChoices] = useState<Map<string, string>>(new Map());
 
   const handleDirectorySelect = async () => {
     try {
@@ -28,37 +40,19 @@ export default function Home() {
         // Read files from directory handle
         const imageFileMap = new Map<string, File>();
         const imageNames: string[] = [];
-        const evaluatedFiles = new Set<string>();
-        
-        // Check for existing CSV to skip already evaluated images
-        try {
-          const csvHandle = await dirHandle.getFileHandle('results.csv');
-          const csvFile = await csvHandle.getFile();
-          const csvContent = await csvFile.text();
-          const lines = csvContent.split('\n').slice(1); // Skip header
-          lines.forEach((line: string) => {
-            const [imageName] = line.split(',');
-            if (imageName && imageName.trim()) {
-              evaluatedFiles.add(imageName.trim());
-            }
-          });
-        } catch {
-          // CSV doesn't exist yet, which is fine
-        }
         
         for await (const [name, handle] of dirHandle) {
           if (handle.kind === 'file' && /\.(jpg|jpeg|png|gif)$/i.test(name)) {
-            if (!evaluatedFiles.has(name)) {
-              const file = await handle.getFile();
-              imageFileMap.set(name, file);
-              imageNames.push(name);
-            }
+            const file = await handle.getFile();
+            imageFileMap.set(name, file);
+            imageNames.push(name);
           }
         }
         
         setImageFiles(imageFileMap);
         setImages(imageNames);
         setCurrentImageIndex(0);
+        setImageChoices(new Map());
       } else {
         fileInputRef.current?.click();
       }
@@ -95,6 +89,7 @@ export default function Home() {
         setImageFiles(imageFileMap);
         setImages(imageNames);
         setCurrentImageIndex(0);
+        setImageChoices(new Map());
       }
     }
   };
@@ -104,6 +99,9 @@ export default function Home() {
     if (images.length === 0) return;
 
     const image = images[currentImageIndex];
+    
+    // Update image choices
+    setImageChoices(prev => new Map(prev.set(image, choice)));
     
     try {
       if (directoryHandle) {
@@ -377,6 +375,10 @@ export default function Home() {
           Settings
         </button>
       </div>
+      
+      <div className="flex gap-4">
+        {/* Main content area */}
+        <div className="flex-1">
 
 
       <div className="mb-4">
@@ -428,14 +430,7 @@ export default function Home() {
               <button 
                 key={`${label.key}-${label.value}`}
                 onClick={() => handleChoice(label.value)} 
-                className={`text-white p-2 px-4 rounded ${
-                  index === 0 ? 'bg-green-500 hover:bg-green-600' : 
-                  index === 1 ? 'bg-red-500 hover:bg-red-600' :
-                  index === 2 ? 'bg-blue-500 hover:bg-blue-600' :
-                  index === 3 ? 'bg-yellow-500 hover:bg-yellow-600' :
-                  index === 4 ? 'bg-purple-500 hover:bg-purple-600' :
-                  'bg-gray-500 hover:bg-gray-600'
-                }`}
+                className={`text-white p-2 px-4 rounded ${getLabelColors(index).bg}`}
               >
                 {label.value} ({label.key})
               </button>
@@ -445,6 +440,66 @@ export default function Home() {
       ) : (
         <p>{directory ? 'No more images to label.' : 'Please select a directory to start labeling images.'}</p>
       )}
+        </div>
+        
+        {/* Timeline area */}
+        {images.length > 0 && (
+          <div className="w-80 bg-gray-50 p-4 rounded-lg">
+            <h2 className="text-lg font-semibold mb-4">Timeline</h2>
+            <div className="space-y-2 max-h-[600px] overflow-y-auto">
+              {images.map((image, index) => (
+                <div 
+                  key={image}
+                  className={`flex items-center gap-3 p-2 rounded ${
+                    index === currentImageIndex 
+                      ? 'border-2 border-blue-500 bg-blue-50' 
+                      : 'border border-gray-200 bg-white'
+                  }`}
+                >
+                  {/* Thumbnail */}
+                  <div className="w-12 h-12 flex-shrink-0">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={
+                        imageFiles.has(image)
+                          ? URL.createObjectURL(imageFiles.get(image)!)
+                          : ''
+                      }
+                      alt={image}
+                      className="w-full h-full object-cover rounded"
+                    />
+                  </div>
+                  
+                  {/* Image info */}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{image}</p>
+                    <p className="text-xs text-gray-500">
+                      {imageChoices.has(image) ? (
+                        <span className={`font-medium ${
+                          (() => {
+                            const choice = imageChoices.get(image);
+                            const labelIndex = labels.findIndex(label => label.value === choice);
+                            return getLabelColors(labelIndex).text;
+                          })()
+                        }`}>
+                          Choice: {imageChoices.get(image)}
+                        </span>
+                      ) : (
+                        <span className="text-gray-400">Not selected</span>
+                      )}
+                    </p>
+                  </div>
+                  
+                  {/* Index indicator */}
+                  <div className="text-xs text-gray-400">
+                    {index + 1}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
