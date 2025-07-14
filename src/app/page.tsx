@@ -19,6 +19,7 @@ export default function Home() {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [error, setError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const timelineRef = useRef<HTMLDivElement>(null);
   const [directoryHandle, setDirectoryHandle] = useState<FileSystemDirectoryHandle | null>(null);
   const [imageFiles, setImageFiles] = useState<Map<string, File>>(new Map());
   const [labels, setLabels] = useState([
@@ -95,7 +96,7 @@ export default function Home() {
   };
 
 
-  const handleChoice = useCallback(async (choice: string) => {
+  const handleChoice = useCallback((choice: string) => {
     if (images.length === 0) return;
 
     const image = images[currentImageIndex];
@@ -103,44 +104,198 @@ export default function Home() {
     // Update image choices
     setImageChoices(prev => new Map(prev.set(image, choice)));
     
+    // Move to next image or cycle back to first
+    const nextIndex = currentImageIndex < images.length - 1 ? currentImageIndex + 1 : 0;
+    setCurrentImageIndex(nextIndex);
+    
+    // Scroll to the next image in Timeline
+    setTimeout(() => {
+      if (timelineRef.current) {
+        const timelineItems = timelineRef.current.children;
+        if (timelineItems[nextIndex]) {
+          timelineItems[nextIndex].scrollIntoView({
+            behavior: 'instant',
+            block: 'start'
+          });
+        }
+      }
+    }, 0);
+  }, [images, currentImageIndex]);
+
+  const saveCsv = useCallback(async () => {
+    if (imageChoices.size === 0) {
+      setError('No choices to save');
+      return;
+    }
+
     try {
+      // Generate date-based filename
+      const now = new Date();
+      const dateString = now.toISOString().split('T')[0]; // YYYY-MM-DD format
+      const filename = `results-${dateString}.csv`;
+      
       if (directoryHandle) {
         // Use File System Access API to write CSV
-        let csvFileHandle;
-        try {
-          csvFileHandle = await directoryHandle.getFileHandle('results.csv');
-        } catch {
-          // File doesn't exist, create it
-          csvFileHandle = await directoryHandle.getFileHandle('results.csv', { create: true });
-          const writable = await csvFileHandle.createWritable();
-          await writable.write('Image,Choice\n');
-          await writable.close();
+        const csvFileHandle = await directoryHandle.getFileHandle(filename, { create: true });
+        const writable = await csvFileHandle.createWritable();
+        
+        // Write header
+        await writable.write('Image,Choice\n');
+        
+        // Write all choices
+        for (const [image, choice] of imageChoices) {
+          await writable.write(`${image},${choice}\n`);
         }
         
-        // Append to CSV
-        const file = await csvFileHandle.getFile();
-        const existingContent = await file.text();
-        const writable = await csvFileHandle.createWritable();
-        await writable.write(existingContent + `${image},${choice}\n`);
         await writable.close();
+        setError('CSV saved successfully');
       } else {
-        // For fallback file input method, save to localStorage temporarily
-        const savedChoices = JSON.parse(localStorage.getItem('imageChoices') || '[]');
-        savedChoices.push({ directory, image, choice, timestamp: new Date().toISOString() });
-        localStorage.setItem('imageChoices', JSON.stringify(savedChoices));
-        setError('Choice saved to browser storage. Use "Select Directory" for direct file saving.');
-      }
-      
-      if (currentImageIndex < images.length - 1) {
-        setCurrentImageIndex(currentImageIndex + 1);
-      } else {
-        setImages([]); // No more images
+        // Fallback: download CSV file
+        const csvContent = 'Image,Choice\n' + 
+          Array.from(imageChoices.entries())
+            .map(([image, choice]) => `${image},${choice}`)
+            .join('\n');
+        
+        const blob = new Blob([csvContent], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+        setError('CSV downloaded successfully');
       }
     } catch (error) {
-      console.error('Failed to save choice:', error);
-      setError('Failed to save choice');
+      console.error('Failed to save CSV:', error);
+      setError('Failed to save CSV');
     }
-  }, [directory, images, currentImageIndex, directoryHandle]);
+  }, [imageChoices, directoryHandle]);
+
+  const processCsvFile = useCallback(async (file: File) => {
+    try {
+      const text = await file.text();
+      const lines = text.split('\n').filter(line => line.trim());
+      
+      if (lines.length < 2) {
+        setError('Invalid CSV format');
+        return;
+      }
+      
+      // Parse CSV (skip header)
+      const newChoices = new Map<string, string>();
+      
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (line) {
+          const [imageName, choice] = line.split(',');
+          if (imageName && choice) {
+            newChoices.set(imageName.trim(), choice.trim());
+          }
+        }
+      }
+      
+      setImageChoices(newChoices);
+      
+      // Set current image index to first unselected image
+      const firstUnselectedIndex = images.findIndex(image => !newChoices.has(image));
+      if (firstUnselectedIndex !== -1) {
+        setCurrentImageIndex(firstUnselectedIndex);
+      } else {
+        // All images are selected, go to first image
+        setCurrentImageIndex(0);
+      }
+      
+      setError(`CSV loaded successfully. ${newChoices.size} choices loaded.`);
+    } catch (error) {
+      console.error('Failed to process CSV:', error);
+      setError('Failed to process CSV');
+    }
+  }, [images]);
+
+  const loadCsv = useCallback(async () => {
+    try {
+      if (directoryHandle) {
+        // Find the most recent results-*.csv file
+        const csvFiles: { name: string; handle: FileSystemFileHandle }[] = [];
+        
+        // @ts-expect-error - FileSystemDirectoryHandle async iterator
+        for await (const [name, handle] of directoryHandle) {
+          if (handle.kind === 'file' && /^results-\d{4}-\d{2}-\d{2}\.csv$/.test(name)) {
+            csvFiles.push({ name, handle });
+          }
+        }
+        
+        // Sort by date (newest first)
+        csvFiles.sort((a, b) => b.name.localeCompare(a.name));
+        
+        // Show file picker with default suggestion
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.csv';
+        input.multiple = false;
+        
+        input.onchange = async (event) => {
+          const file = (event.target as HTMLInputElement).files?.[0];
+          if (file) {
+            await processCsvFile(file);
+          }
+        };
+        
+        // If we have a recent CSV file, suggest it
+        if (csvFiles.length > 0) {
+          const recentFile = await csvFiles[0].handle.getFile();
+          
+          // For File System Access API, we can directly process the most recent file
+          // or let user choose
+          const userWantsRecent = confirm(`Load most recent CSV file: ${csvFiles[0].name}?`);
+          if (userWantsRecent) {
+            await processCsvFile(recentFile);
+            return;
+          }
+        }
+        
+        input.click();
+      } else {
+        // Fallback: regular file picker
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.csv';
+        input.multiple = false;
+        
+        input.onchange = async (event) => {
+          const file = (event.target as HTMLInputElement).files?.[0];
+          if (file) {
+            await processCsvFile(file);
+          }
+        };
+        
+        input.click();
+      }
+    } catch (error) {
+      console.error('Failed to load CSV:', error);
+      setError('Failed to load CSV');
+    }
+  }, [directoryHandle, processCsvFile]);
+
+  const goToNextUnselected = useCallback(() => {
+    const firstUnselectedIndex = images.findIndex(image => !imageChoices.has(image));
+    if (firstUnselectedIndex !== -1) {
+      setCurrentImageIndex(firstUnselectedIndex);
+      
+      // Scroll to the unselected image in Timeline
+      setTimeout(() => {
+        if (timelineRef.current) {
+          const timelineItems = timelineRef.current.children;
+          if (timelineItems[firstUnselectedIndex]) {
+            timelineItems[firstUnselectedIndex].scrollIntoView({
+              behavior: 'instant',
+              block: 'start'
+            });
+          }
+        }
+      }, 0);
+    }
+  }, [images, imageChoices]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -368,12 +523,28 @@ export default function Home() {
     <div className="container mx-auto p-4">
       <div className="flex justify-between items-center mb-4">
         <h1 className="text-2xl font-bold">Image Labeling App</h1>
-        <button 
-          onClick={openSettingsWindow}
-          className="bg-blue-500 text-white px-4 py-2 rounded"
-        >
-          Settings
-        </button>
+        <div className="flex gap-2">
+          <button 
+            onClick={loadCsv}
+            disabled={images.length === 0}
+            className="bg-orange-500 text-white px-4 py-2 rounded disabled:bg-gray-300 disabled:cursor-not-allowed"
+          >
+            Load CSV
+          </button>
+          <button 
+            onClick={saveCsv}
+            disabled={imageChoices.size === 0}
+            className="bg-green-500 text-white px-4 py-2 rounded disabled:bg-gray-300 disabled:cursor-not-allowed"
+          >
+            Save CSV
+          </button>
+          <button 
+            onClick={openSettingsWindow}
+            className="bg-blue-500 text-white px-4 py-2 rounded"
+          >
+            Settings
+          </button>
+        </div>
       </div>
       
       <div className="flex gap-4">
@@ -408,7 +579,7 @@ export default function Home() {
 
       {error && <p className="text-red-500">{error}</p>}
 
-      {images.length > 0 && currentImageIndex < images.length ? (
+      {images.length > 0 ? (
         <div>
           <div className="mb-2">
             <h2 className="text-lg font-semibold">Current Image:</h2>
@@ -423,7 +594,7 @@ export default function Home() {
                 : ''
             }
             alt={images[currentImageIndex]}
-            className="max-w-full h-auto mb-4"
+            className="max-w-full max-h-[70vh] object-contain mb-4"
           />
           <div className="flex flex-wrap gap-3">
             {labels.map((label, index) => (
@@ -446,11 +617,12 @@ export default function Home() {
         {images.length > 0 && (
           <div className="w-80 bg-gray-50 p-4 rounded-lg">
             <h2 className="text-lg font-semibold mb-4">Timeline</h2>
-            <div className="space-y-2 max-h-[600px] overflow-y-auto">
+            <div ref={timelineRef} className="space-y-2 max-h-[600px] overflow-y-auto">
               {images.map((image, index) => (
                 <div 
                   key={image}
-                  className={`flex items-center gap-3 p-2 rounded ${
+                  onClick={() => setCurrentImageIndex(index)}
+                  className={`flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100 ${
                     index === currentImageIndex 
                       ? 'border-2 border-blue-500 bg-blue-50' 
                       : 'border border-gray-200 bg-white'
@@ -496,6 +668,15 @@ export default function Home() {
                   </div>
                 </div>
               ))}
+            </div>
+            <div className="mt-4">
+              <button 
+                onClick={goToNextUnselected}
+                disabled={images.length === 0 || images.every(image => imageChoices.has(image))}
+                className="w-full bg-purple-500 text-white px-4 py-2 rounded disabled:bg-gray-300 disabled:cursor-not-allowed"
+              >
+                Jump to Unselected Figure
+              </button>
             </div>
           </div>
         )}
