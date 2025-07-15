@@ -51,9 +51,15 @@ export default function Home() {
         }
         
         setImageFiles(imageFileMap);
-        setImages(imageNames);
+        const sortedImages = imageNames.sort();
+        setImages(sortedImages);
         setCurrentImageIndex(0);
         setImageChoices(new Map());
+        
+        // Auto-load CSV after directory selection
+        setTimeout(() => {
+          autoLoadCsv(sortedImages);
+        }, 100);
       } else {
         fileInputRef.current?.click();
       }
@@ -88,9 +94,16 @@ export default function Home() {
         });
         
         setImageFiles(imageFileMap);
-        setImages(imageNames);
+        const sortedImages = imageNames.sort();
+        setImages(sortedImages);
         setCurrentImageIndex(0);
         setImageChoices(new Map());
+        
+        // Auto-load CSV after directory selection (fallback method)
+        // Note: autoLoadCsv only works with File System Access API, not with fallback method
+        setTimeout(() => {
+          autoLoadCsv(sortedImages);
+        }, 100);
       }
     }
   };
@@ -129,33 +142,45 @@ export default function Home() {
     }
 
     try {
-      // Generate date-based filename
+      // Generate date-time-based filename
       const now = new Date();
       const dateString = now.toISOString().split('T')[0]; // YYYY-MM-DD format
-      const filename = `results-${dateString}.csv`;
+      const timeString = now.toTimeString().split(' ')[0].slice(0, 5); // HH:MM format
+      const filename = `results-${dateString}-${timeString.replace(':', '')}.csv`;
       
-      if (directoryHandle) {
-        // Use File System Access API to write CSV
-        const csvFileHandle = await directoryHandle.getFileHandle(filename, { create: true });
-        const writable = await csvFileHandle.createWritable();
-        
-        // Write header
-        await writable.write('Image,Choice\n');
-        
-        // Write all choices
-        for (const [image, choice] of imageChoices) {
-          await writable.write(`${image},${choice}\n`);
+      // Create CSV content
+      const csvContent = 'Image,Choice\n' + 
+        Array.from(imageChoices.entries())
+          .map(([image, choice]) => `${image},${choice}`)
+          .join('\n');
+      
+      // Always use File System Access API's showSaveFilePicker if available
+      if ('showSaveFilePicker' in window) {
+        try {
+          // @ts-expect-error - showSaveFilePicker not in TypeScript definitions
+          const fileHandle = await window.showSaveFilePicker({
+            suggestedName: filename,
+            types: [
+              {
+                description: 'CSV files',
+                accept: { 'text/csv': ['.csv'] },
+              },
+            ],
+          });
+          
+          const writable = await fileHandle.createWritable();
+          await writable.write(csvContent);
+          await writable.close();
+          setError('CSV saved successfully');
+        } catch (error) {
+          // User cancelled the dialog
+          if (error instanceof Error && error.name === 'AbortError') {
+            return;
+          }
+          throw error;
         }
-        
-        await writable.close();
-        setError('CSV saved successfully');
       } else {
         // Fallback: download CSV file
-        const csvContent = 'Image,Choice\n' + 
-          Array.from(imageChoices.entries())
-            .map(([image, choice]) => `${image},${choice}`)
-            .join('\n');
-        
         const blob = new Blob([csvContent], { type: 'text/csv' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -169,7 +194,7 @@ export default function Home() {
       console.error('Failed to save CSV:', error);
       setError('Failed to save CSV');
     }
-  }, [imageChoices, directoryHandle]);
+  }, [imageChoices]);
 
   const processCsvFile = useCallback(async (file: File) => {
     try {
@@ -220,7 +245,7 @@ export default function Home() {
         
         // @ts-expect-error - FileSystemDirectoryHandle async iterator
         for await (const [name, handle] of directoryHandle) {
-          if (handle.kind === 'file' && /^results-\d{4}-\d{2}-\d{2}\.csv$/.test(name)) {
+          if (handle.kind === 'file' && /^results-\d{4}-\d{2}-\d{2}-\d{4}\.csv$/.test(name)) {
             csvFiles.push({ name, handle });
           }
         }
@@ -257,19 +282,19 @@ export default function Home() {
         input.click();
       } else {
         // Fallback: regular file picker
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = '.csv';
-        input.multiple = false;
-        
-        input.onchange = async (event) => {
-          const file = (event.target as HTMLInputElement).files?.[0];
-          if (file) {
-            await processCsvFile(file);
-          }
-        };
-        
-        input.click();
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.csv';
+      input.multiple = false;
+      
+      input.onchange = async (event) => {
+        const file = (event.target as HTMLInputElement).files?.[0];
+        if (file) {
+          await processCsvFile(file);
+        }
+      };
+      
+      input.click();
       }
     } catch (error) {
       console.error('Failed to load CSV:', error);
