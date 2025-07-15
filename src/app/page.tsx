@@ -57,9 +57,6 @@ export default function Home() {
         setImageChoices(new Map());
         
         // Auto-load CSV after directory selection
-        setTimeout(() => {
-          autoLoadCsv(sortedImages);
-        }, 100);
       } else {
         fileInputRef.current?.click();
       }
@@ -100,10 +97,6 @@ export default function Home() {
         setImageChoices(new Map());
         
         // Auto-load CSV after directory selection (fallback method)
-        // Note: autoLoadCsv only works with File System Access API, not with fallback method
-        setTimeout(() => {
-          autoLoadCsv(sortedImages);
-        }, 100);
       }
     }
   };
