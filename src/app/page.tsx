@@ -555,7 +555,7 @@ export default function Home() {
   return (
     <div className="container mx-auto p-4">
       <div className="flex justify-between items-center mb-4">
-        <h1 className="text-2xl font-bold">Image Labeling App</h1>
+        <h1 className="text-2xl font-bold">Figure Checker</h1>
         <div className="flex gap-2">
           <button 
             onClick={loadCsv}
