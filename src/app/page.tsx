@@ -28,6 +28,8 @@ export default function Home() {
   ]);
   const [settingsWindow, setSettingsWindow] = useState<Window | null>(null);
   const [imageChoices, setImageChoices] = useState<Map<string, string>>(new Map());
+  const [allFiguresChecked, setAllFiguresChecked] = useState(false);
+  const [hasShownAllCheckedMessage, setHasShownAllCheckedMessage] = useState(false);
 
   const handleDirectorySelect = async () => {
     try {
@@ -55,6 +57,8 @@ export default function Home() {
         setImages(sortedImages);
         setCurrentImageIndex(0);
         setImageChoices(new Map());
+        setAllFiguresChecked(false);
+        setHasShownAllCheckedMessage(false);
         
         // Auto-load CSV after directory selection
       } else {
@@ -95,6 +99,8 @@ export default function Home() {
         setImages(sortedImages);
         setCurrentImageIndex(0);
         setImageChoices(new Map());
+        setAllFiguresChecked(false);
+        setHasShownAllCheckedMessage(false);
         
         // Auto-load CSV after directory selection (fallback method)
       }
@@ -103,12 +109,20 @@ export default function Home() {
 
 
   const handleChoice = useCallback((choice: string) => {
-    if (images.length === 0) return;
+    if (images.length === 0 || allFiguresChecked) return;
 
     const image = images[currentImageIndex];
     
     // Update image choices
-    setImageChoices(prev => new Map(prev.set(image, choice)));
+    const updatedChoices = new Map(imageChoices.set(image, choice));
+    setImageChoices(updatedChoices);
+    
+    // Check if all figures are now checked for the first time
+    if (!allFiguresChecked && !hasShownAllCheckedMessage && images.every(img => updatedChoices.has(img))) {
+      setAllFiguresChecked(true);
+      setHasShownAllCheckedMessage(true);
+      return; // Don't move to next image when all are checked for the first time
+    }
     
     // Move to next image or cycle back to first
     const nextIndex = currentImageIndex < images.length - 1 ? currentImageIndex + 1 : 0;
@@ -126,7 +140,7 @@ export default function Home() {
         }
       }
     }, 0);
-  }, [images, currentImageIndex]);
+  }, [images, currentImageIndex, imageChoices, allFiguresChecked, hasShownAllCheckedMessage]);
 
   const saveCsv = useCallback(async () => {
     if (imageChoices.size === 0) {
@@ -613,34 +627,41 @@ export default function Home() {
       {error && <p className="text-red-500">{error}</p>}
 
       {images.length > 0 ? (
-        <div>
-          <div className="mb-2">
-            <h2 className="text-lg font-semibold">Current Image:</h2>
-            <p className="text-gray-600">{images[currentImageIndex]}</p>
-            <p className="text-sm text-gray-500">Image {currentImageIndex + 1} of {images.length}</p>
+        allFiguresChecked ? (
+          <div className="text-center py-8">
+            <h2 className="text-2xl font-bold text-green-600 mb-4">All figure checked.</h2>
+            <p className="text-gray-600">すべての画像の評価が完了しました。</p>
           </div>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={
-              imageFiles.has(images[currentImageIndex])
-                ? URL.createObjectURL(imageFiles.get(images[currentImageIndex])!)
-                : ''
-            }
-            alt={images[currentImageIndex]}
-            className="max-w-full max-h-[70vh] object-contain mb-4"
-          />
-          <div className="flex flex-wrap gap-3">
-            {labels.map((label, index) => (
-              <button 
-                key={`${label.key}-${label.value}`}
-                onClick={() => handleChoice(label.value)} 
-                className={`text-white p-2 px-4 rounded ${getLabelColors(index).bg}`}
-              >
-                {label.value} ({label.key})
-              </button>
-            ))}
+        ) : (
+          <div>
+            <div className="mb-2">
+              <h2 className="text-lg font-semibold">Current Image:</h2>
+              <p className="text-gray-600">{images[currentImageIndex]}</p>
+              <p className="text-sm text-gray-500">Image {currentImageIndex + 1} of {images.length}</p>
+            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={
+                imageFiles.has(images[currentImageIndex])
+                  ? URL.createObjectURL(imageFiles.get(images[currentImageIndex])!)
+                  : ''
+              }
+              alt={images[currentImageIndex]}
+              className="max-w-full max-h-[70vh] object-contain mb-4"
+            />
+            <div className="flex flex-wrap gap-3">
+              {labels.map((label, index) => (
+                <button 
+                  key={`${label.key}-${label.value}`}
+                  onClick={() => handleChoice(label.value)} 
+                  className={`text-white p-2 px-4 rounded ${getLabelColors(index).bg}`}
+                >
+                  {label.value} ({label.key})
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )
       ) : (
         <p>{directory ? 'No more images to label.' : 'Please select a directory to start labeling images.'}</p>
       )}
@@ -654,9 +675,14 @@ export default function Home() {
               {images.map((image, index) => (
                 <div 
                   key={image}
-                  onClick={() => setCurrentImageIndex(index)}
+                  onClick={() => {
+                    setCurrentImageIndex(index);
+                    if (allFiguresChecked) {
+                      setAllFiguresChecked(false);
+                    }
+                  }}
                   className={`flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100 ${
-                    index === currentImageIndex 
+                    index === currentImageIndex && !allFiguresChecked
                       ? 'border-2 border-blue-500 bg-blue-50' 
                       : 'border border-gray-200 bg-white'
                   }`}
