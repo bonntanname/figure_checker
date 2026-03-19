@@ -30,6 +30,12 @@ export default function Home() {
   const [imageChoices, setImageChoices] = useState<Map<string, string>>(new Map());
   const [allFiguresChecked, setAllFiguresChecked] = useState(false);
   const [hasShownAllCheckedMessage, setHasShownAllCheckedMessage] = useState(false);
+  const [zoomLevel, setZoomLevel] = useState(1);
+
+  // Reset zoom when image changes
+  useEffect(() => {
+    setZoomLevel(1);
+  }, [currentImageIndex]);
 
   const handleDirectorySelect = async () => {
     try {
@@ -639,16 +645,29 @@ export default function Home() {
               <p className="text-gray-600">{images[currentImageIndex]}</p>
               <p className="text-sm text-gray-500">Image {currentImageIndex + 1} of {images.length}</p>
             </div>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={
-                imageFiles.has(images[currentImageIndex])
-                  ? URL.createObjectURL(imageFiles.get(images[currentImageIndex])!)
-                  : ''
-              }
-              alt={images[currentImageIndex]}
-              className="max-w-full max-h-[70vh] object-contain mb-4"
-            />
+            <div className="overflow-auto mb-4" style={{ maxHeight: '70vh' }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={
+                  imageFiles.has(images[currentImageIndex])
+                    ? URL.createObjectURL(imageFiles.get(images[currentImageIndex])!)
+                    : ''
+                }
+                alt={images[currentImageIndex]}
+                className="max-w-full object-contain cursor-zoom-in"
+                style={{
+                  transform: `scale(${zoomLevel})`,
+                  transformOrigin: 'top left',
+                  maxHeight: zoomLevel === 1 ? '70vh' : 'none',
+                  maxWidth: zoomLevel === 1 ? '100%' : 'none',
+                }}
+                onClick={() => setZoomLevel((z) => Math.min(z + 0.5, 5))}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setZoomLevel((z) => Math.max(z - 0.5, 1));
+                }}
+              />
+            </div>
             <div className="flex flex-wrap gap-3">
               {labels.map((label, index) => (
                 <button 
